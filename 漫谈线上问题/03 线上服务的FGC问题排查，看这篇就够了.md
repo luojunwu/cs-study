@@ -1,3 +1,7 @@
+# 线上服务的FGC问题排查，看这篇就够了
+
+<br/>
+
 线上服务的GC问题，是Java程序非常典型的一类问题，非常考验工程师排查问题的能力。同时，几乎是面试必考题，但是能真正答好此题的人并不多，要么原理没吃透，要么缺乏实战经验。
 
 过去半年时间里，我们的广告系统出现了多次和GC相关的线上问题，有Full GC过于频繁的，有Young GC耗时过长的，这些问题带来的影响是：GC过程中的程序卡顿，进一步导致服务超时从而影响到广告收入。
@@ -15,7 +19,7 @@
 # 01 从一次FGC频繁的线上案例说起
 去年10月份，我们的广告召回系统在程序上线后收到了FGC频繁的系统告警，通过下面的监控图可以看到：平均每35分钟就进行了一次FGC。而程序上线前，我们的FGC频次大概是2天一次。下面，详细介绍下该问题的排查过程。
 
-![](https://img2020.cnblogs.com/blog/2015191/202006/2015191-20200614231632162-1641513891.png)
+![](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/8e009e6d087a4f1b8a4af4b19fd73a9d~tplv-k3u1fbpfcp-zoom-1.image)
 
 ## 1. 检查JVM配置
 
@@ -37,13 +41,13 @@ ps aux | grep "applicationName=adsearch"
 
 通过观察老年代的使用情况，可以看到：每次FGC后，内存都能回到500M左右，因此我们排除了内存泄漏的情况。
 
-![](https://img2020.cnblogs.com/blog/2015191/202006/2015191-20200614231937405-1362921392.png)
+![](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/f5ec5b1b139d4902a4a0487e3adcff35~tplv-k3u1fbpfcp-zoom-1.image)
 
 ## 3. 通过jmap命令查看堆内存中的对象
 
 通过命令 jmap -histo 7276 | head -n20
 
-![](https://img2020.cnblogs.com/blog/2015191/202006/2015191-20200614232026609-1545555997.png)
+![](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/c671f4ee82d845a983e6c964a2ac97be~tplv-k3u1fbpfcp-zoom-1.image)
 
 上图中，按照对象所占内存大小排序，显示了存活对象的实例数、所占内存、类名。可以看到排名第一的是：int[]，而且所占内存大小远远超过其他存活对象。至此，我们将怀疑目标锁定在了 int[] .
 
@@ -55,7 +59,7 @@ jmap -dump:format=b,file=heap 7276
 
 通过JVisualVM工具导入dump出来的堆内存文件，同样可以看到各个对象所占空间，其中int[]占到了50%以上的内存，进一步往下便可以找到 int[] 所属的业务对象，发现它来自于架构团队提供的codis基础组件。
 
-![](https://img2020.cnblogs.com/blog/2015191/202006/2015191-20200614232149171-294044029.png)
+![](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/02b4321195414e929fdbe018a058df7a~tplv-k3u1fbpfcp-zoom-1.image)
 
 ## 5. 通过代码分析可疑对象
 
@@ -63,7 +67,7 @@ jmap -dump:format=b,file=heap 7276
 
 我们进一步查看了YGC的频次监控，通过下图可以看到大概1分钟有8次左右的YGC，这样基本验证了我们的推断：因为CMS收集器默认的分代年龄是6次，即YGC 6次后还存活的对象就会晋升到老年代，而codis组件中的大数组生命周期是1分钟，刚好满足这个要求。
 
-![](https://img2020.cnblogs.com/blog/2015191/202006/2015191-20200614232233434-734001373.png)
+![](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/f58dc4a97ba44ffdadc19e0af965feb7~tplv-k3u1fbpfcp-zoom-1.image)
 
 至此，整个排查过程基本结束了，那为什么程序上线前没出现此问题呢？通过上图可以看到：程序上线前YGC的频次在5次左右，此次上线后YGC频次变成了8次左右，从而引发了此问题。
 
@@ -83,7 +87,7 @@ jmap -dump:format=b,file=heap 7276
 
 大家都知道: GC分为YGC和FGC，它们均发生在JVM的堆内存上。先来看下JDK8的堆内存结构：
 
-![](https://img2020.cnblogs.com/blog/2015191/202006/2015191-20200614233000407-1687109238.png)
+![](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/2ca3c284e3ba4b5d8e5ee31a09c4a190~tplv-k3u1fbpfcp-zoom-1.image)
 
 
 可以看到，堆内存采用了分代结构，包括新生代和老年代。新生代又分为：Eden区，From Survivor区（简称S0），To Survivor区（简称S1区），三者的默认比例为8:1:1。另外，新生代和老年代的默认比例为1:2。
@@ -196,6 +200,13 @@ jmap -dump:format=b,file=heap 7276
 后续会以类似的方式，再分享一个YGC耗时过长的案例，希望能帮助大家吃透GC问题排查，如果觉得本文对你有帮助，请大家关注我的个人公众号！
 
 
+<br/>
+
+
+---
+
 作者简介：985硕士，前亚马逊工程师，现58转转技术总监
 
-**欢迎关注我的个人公众号：IT人的职场进阶**
+**欢迎扫描下方的二维码，关注我的个人公众号：武哥漫谈IT，精彩原创不断！**
+
+![](https://img-blog.csdnimg.cn/20201107215432925.jpg)
