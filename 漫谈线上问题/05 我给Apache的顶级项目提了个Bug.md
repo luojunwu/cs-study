@@ -1,3 +1,7 @@
+# 我给Apache的顶级项目提了个Bug
+
+<br/>
+
 ![](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/ea3769109f2145a6ab4e09b407fefa4c~tplv-k3u1fbpfcp-zoom-1.image)
 
 这篇文章记录了给 Apache 顶级项目 - 分库分表中间件 ShardingSphere 提交 Bug 的历程。
@@ -14,6 +18,8 @@
 > 
 > 4、Wireshark 抓包分析 MySQL 的奇淫技巧
 
+<br/>
+
 # 01 问题描述 
 
 这个 Bug 来源于我的公号读者，他替公司预研 ShardingProxy（属于 ShardingSphere 的子产品，可用作分库分表，后文会详细介绍）。他按照官方文档写了一个很简单的 demo，但是运行后无法查询出数据。
@@ -25,7 +31,9 @@
 
 为了方便大家理解，我重新描述下这个 Demo 的业务逻辑以及问题表象。
 
-## 1. Demo 的业务逻辑说明
+<br/>
+
+## 1.1 Demo 的业务逻辑说明
 
 这个 Demo 很简单，主要为了跑通 ShardingProxy  的分库分表功能。程序用 SpringBoot + MyBatis 实现了一个单表的查询逻辑，然后用这张表的一个 long 类型字段作为分区键，并通过 ShardingProxy 进行了分表。
 
@@ -53,7 +61,9 @@
 > 
 > algorithmExpression: pscst\_prdt\_cvr${ecif\_cust\_no % 2}
 
-## 2. 问题描述
+<br/>
+
+## 1.2 问题描述
 
 再说下遇到的问题。首先，往数据表中预先插入一条 ECIF\_CUST\_NO 等于 10000 的数据：
 ![](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/d83af34c53de4dc991162f5d4ab7d09b~tplv-k3u1fbpfcp-zoom-1.image)![](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/663688817ddc4a70bc46ae4aaae05234~tplv-k3u1fbpfcp-zoom-1.image)
@@ -63,6 +73,8 @@
 
 至此，背景基本交代清楚了，为什么数据库中明明有数据，但是程序却查询不出来呢？问题到底出现在 ShardingProxy，还是应用程序本身？
 
+<br/>
+
 # 02 ShardingProxy 原理简介 
 
 在开启这个问题的分析过程之前，我先快速普及下 ShardingProxy 的基本原理，以便大家能更好的理解我的分析思路。
@@ -71,7 +83,9 @@
 
 ShardingSphere 的目标是一个生态圈，它由非常著名的 ShardingJDBC、ShardingProxy、ShardingSidecar 3 款独立的产品组成。本文重点普及下 ShardingProxy，另外两个就不展开了。
 
-## 1\. 什么是 ShardingProxy ？
+<br/>
+
+## 2.1 什么是 ShardingProxy ？
 
 ShardingProxy 属于和 MyCat 对标的产品，定位为透明化的数据库代理端，可以理解成：一个实现了 MySQL 协议的 Server（独立进程），可用于读写分离、分库分表、柔性事务等场景。
 
@@ -80,7 +94,9 @@ ShardingProxy 属于和 MyCat 对标的产品，定位为透明化的数据库�
 
 从架构图来看，ShardingProxy 就相当于 MySQL，它本身不存储数据，但是对外屏蔽了 Database 的存储细节，你可以用连接 MySQL 的方式去连接 ShardingProxy（除了端口不同），用你熟悉的 ORMapping 框架使用它。
 
-## 2\. ShardingProxy 的内部架构
+<br/>
+
+## 2.2 ShardingProxy 的内部架构
 
 再来看下 ShardingProxy 的内部架构，后续源码分析时会涉及到此部分。
 ![](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/4aae448027b946a38c3e20ab57c6db22~tplv-k3u1fbpfcp-zoom-1.image)
@@ -93,7 +109,9 @@ ShardingProxy 属于和 MyCat 对标的产品，定位为透明化的数据库�
 
 后端（Backend）与真实数据库交互，采用 Hikari 连接池，同样涉及到 MySQL 协议的编解码。
 
-## 3\. ShardingProxy 的预编译 SQL 功能
+<br/>
+
+## 2.3 ShardingProxy 的预编译 SQL 功能
 
 本文的 Bug 跟 ShardingProxy 的预编译 SQL 有关，这里单独介绍下此功能以及与之相关的 MySQL 协议，这个是本文的关键，请耐心看完。
 
@@ -125,6 +143,8 @@ SELECT * FROM t_user WHERE user_id = 10;
 
 可以看到，Proxy在收到 PreparedStatement 命令后，并不会把这条消息转发给MySQL，只是缓存了这个 SQL，在收到 ExecuteStatement 命令后，才根据分片键和传过来的参数值确定真实的数据库，并与 MySQL 交互。
 
+<br/>
+
 # 03 问题分析 
 
 上一章节基本把这个 Bug 相关的原理知识介绍清楚了，下面正式进入问题的分析过程。
@@ -134,11 +154,15 @@ SELECT * FROM t_user WHERE user_id = 10;
 
 当然，我的功力是达不到盲猜水平的，说下我的完整思路。
 
+<br/>
+
 ## 第 1 步  复现问题
 
 我让读者给我打包发了 Demo 的源代码、数据库脚本以及 ShardingProxy 配置，然后本地安装了 ShardingProxy 4.1.1 版本，再通过 Navicat 连接到 ShardingProxy 执行数据库脚本，环境基本就准备完毕了。
 
 启动 Demo 程序后，通过 Postman 发送请求，问题稳定复现了，确实查不出数据。
+
+<br/>
 
 ## 第 2 步 确认应用程序是否有BUG
 
@@ -155,6 +179,8 @@ SELECT * FROM t_user WHERE user_id = 10;
 ![](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/44fac4d3cb58490a84b06ba3b3acce35~tplv-k3u1fbpfcp-zoom-1.image)
 
 通过这一步，我将怀疑对象再次转移到 ShardingProxy 上了，并将 dataSource 配置改回成原样，继续排查。
+
+<br/>
 
 ## 第 3 步 排查 ShardingProxy
 
@@ -181,6 +207,8 @@ WHERE ECIF_CUST_NO = ? ::: [10000]
 库名和端口号配置无误，唯一可疑的是另外三个参数: useServerPrepStmts、cachePrepStmts 、serverTimezone。其中，前两个参数和预编译 SQL 有关，是一个组合。
 
 因此，我将这两个参数从 url 中去掉，测试了一下。这个时候奇迹出现了，居然返回了正确数据。至此，基本定位到了问题，但根本原因是什么呢？究竟是不是 ShardingProxy 的 Bug ？
+
+<br/>
 
 ## 第 4 步 Wireshark 抓包分析 MySQL 协议
 
@@ -218,6 +246,8 @@ Wireshark 如何抓取 MySQL 协议的数据包，这里就不展开了，大家
 
 通过这一步分析，就已经坐实了：ShardingProxy 是有 Bug 的。然后，我将这些依据发给了官方开发者，对方开始重视，并正式进入源码分析阶段。
 
+<br/>
+
 # 04 根本原因定位 
 
 当天晚上，官方开发者就定位到了根本原因，发出了 Pull Request。我看了下代码改动，仅仅修改了一行代码。
@@ -249,16 +279,22 @@ Wireshark 如何抓取 MySQL 协议的数据包，这里就不展开了，大家
 
 至此，整个分析过程就结束了。
 
+<br/>
+
 # 05 写在最后 
 
 本文详细复盘了这个 Bug 的分析过程，并对其中的原理知识和排查经验进行了总结。
 
 对于 ShardingSphere 这种顶级开源项目来说，我个人觉得同样值得做一次深度复盘。我不认同他们对于 issue 的处理方式，另外在核心功能的自动化测试上，也一定是存在 case 不完善的，不然不可能连续多个版本都没发现这个严重 Bug。
 
-如果你有任何疑问，欢迎评论区留言讨论。
+
+<br/>
+
+
+---
 
 作者简介：985硕士，前亚马逊工程师，现58转转技术总监
 
-**欢迎扫描下方的二维码，关注我的个人公众号：IT人的职场进阶**
+**欢迎扫描下方的二维码，关注我的个人公众号：武哥漫谈IT，精彩原创不断！**
 
 ![](https://img-blog.csdnimg.cn/20201107215432925.jpg)
