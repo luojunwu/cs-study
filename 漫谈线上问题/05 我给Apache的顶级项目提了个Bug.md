@@ -2,8 +2,6 @@
 
 <br/>
 
-![](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/ea3769109f2145a6ab4e09b407fefa4c~tplv-k3u1fbpfcp-zoom-1.image)
-
 这篇文章记录了给 Apache 顶级项目 - 分库分表中间件 ShardingSphere 提交 Bug 的历程。
 
 说实话，这是一次比较曲折的 Bug 跟踪之旅。10月28日，我们在 GitHub 上提交 issue，中途因为官方开发者的主观臆断被 Close 了两次，直到 11 月 20 日才被认定成 Bug 并发出修复版本，历时 20 多天。
